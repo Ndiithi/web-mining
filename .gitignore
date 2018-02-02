@@ -153,3 +153,10 @@ cred.txt
 /Python Snippets/
 .project
 .projects
+.scrapy.cfg
+*.pyc
+.settings
+.settings/
+.scrapy/
+.scrapy
+.pydevproject
