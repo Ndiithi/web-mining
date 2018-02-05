@@ -1,2 +1,2 @@
 # spiders
-Various scripts and spiders real world solutions
+Various scripts and bots/spiders real world solutions
