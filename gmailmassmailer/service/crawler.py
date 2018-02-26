@@ -1,28 +1,34 @@
-import logging
 from time import sleep
 from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException
 import csv
 import os
-import logging.handlers
-from logging import Logger
+import logging
+from model.dto import account
+from service import lg
+from pip.utils.outdated import SELFCHECK_DATE_FMT
+from pyexpat import model
+from model.dao import account as account_dao
+from model.dao import campaign as campaign_dao
+from model.dao import message as message_dao
+from model.dto import recipient
+from model.dao import recipient as recipient_dao
+
+logger = logging.getLogger(__name__)
+
 parentdir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-os.sys.path.insert(0,parentdir) 
+os.sys.path.insert(0, parentdir) 
 from model.dao import error
 from model.dto import single_campaign
-from model.dto import multi_campaign
 
-#start_url = 'https://mail.google.com'
-start_url = 'http://139.59.4.7:8080/settings/'
+start_url = 'https://mail.google.com'
+# start_url = 'http://139.59.4.7:8080/settings/'
+GMAIL_SEND_LIMIT=500
 LOG_PATH = os.path.abspath('./logs')
 LOG_PATH = LOG_PATH + "/"
 
-logger = logging.getLogger("GmailMassMailer")
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger.setLevel(logging.DEBUG)
 
 class Gmail:
     
@@ -36,218 +42,402 @@ class Gmail:
         self.driver = webdriver.Chrome(chrome_options=options)
         # self.driver = webdriver.Firefox()
         self.driver.implicitly_wait(5)  # seconds
-        self.accounts={}
-        self.recipients=[]
-    
-    
-    def login_to_gmail(self, user_name, password):
-        from __builtin__ import str
-        log_in_susccesful=False
+        self.accounts = {}
+        self.recipients = []
+        
+        
+    def open_compose_mail_page(self,user_name):
+        log_in_susccesful = False
         try:
-            self.driver.save_screenshot(LOG_PATH +user_name +'_login_username.png')
+            # url to switch to basic view after login
+            logger.info('Switching to basic view')
+            self.open_url('https://mail.google.com/mail/u/0/h/1pq68r75kzvdr/?v%3Dlui')
+            sleep(15)
+            if 'Do you really want to use HTML Gmail' in self.driver.page_source:
+                logger.info('Gmail prompted if we want to use basic version, accepting')
+                accept_basic_html_btn = WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_css_selector('#maia-main > form > p > input'))
+                accept_basic_html_btn.click()
+                sleep(15)
+              
+            logger.info('Composing mail')    
+            self.driver.find_element_by_xpath("//*[contains(text(), 'Compose')]").click()
+            log_in_susccesful=True
+        except Exception,e:
+            logger.debug(e, exc_info=True)       
+            self.driver.save_screenshot(LOG_PATH + user_name + 'mail_compose_error.png')
+            error_msg = 'Error during mail composition for account user: {}'.format(user_name)
+            error_msg = error_msg + ' please see error image at {}'.format(LOG_PATH + user_name + 'mail_compose_error.png')
+            logger.error(error_msg)
+            err = error()
+            err.save_error(error_msg + '\n' + str(e))
+        return log_in_susccesful
+        
+        
+    def save_very_phone_error(self,user_name):     
+        error_msg = 'Need to manually verify phone account for user: {}\n'.format(user_name)
+        error_msg=error_msg+'To fix this, please run this gmailer crawler providing only this account username and password and verify phone once requested by google\n'
+        error_msg = error_msg + ' please see error image at {}'.format(LOG_PATH + user_name + '_login_error.png')
+        logger.error(error_msg)
+        err = error()
+        err.save_error(error_msg)
+    
+    
+    def login_to_gmail(self, user_name, password,fix_veryfy=False):
+        '''
+            fix_veryfy when called with this set true, it opens up the browser to fix googles phone authentication
+        '''
+        log_in_susccesful = False
+        if 'One account. All of Google' in self.driver.page_source:
+            self.driver.save_screenshot(LOG_PATH + user_name + '_login_username.png')
+            logger.info('logging in to gmail')
+            # user name
+            self.driver.find_element_by_xpath('//input[@name="identifier"]').send_keys(user_name)
+            # next
+            sleep(2)
+            self.driver.execute_script("document.querySelector('input[id=\"next\"]').click(); ")
+            sleep(9)
+            # Passwd
+            self.driver.save_screenshot(LOG_PATH + user_name + '_login_password.png')
+            self.driver.find_element_by_xpath('//input[@name="Passwd"]').send_keys(password)
+            sleep(2)
+            # sign in  signIn
+            self.driver.execute_script("document.querySelector('input[id=\"signIn\"]').click(); ")
+            sleep(12)
+            try:
+                img=WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_css_selector('div img'))
+                veryfy_phone_text=img.get_attribute('href')
+                #check if the veryfy phone page shows up
+                if 'signin_tapyes' in veryfy_phone_text or 'embedded' in veryfy_phone_text:
+                    self.save_very_phone_error(user_name)
+            except Exception,e:
+                #logger.error(e, exc_info=True)
+                pass
+            if not fix_veryfy:
+                log_in_susccesful = self.open_compose_mail_page(user_name)
+        try:
+            self.driver.save_screenshot(LOG_PATH + user_name + '_login_username.png')
             logger.info('logging in to gmail')
             self.driver.find_element_by_xpath('//input[@name="identifier"]').send_keys(user_name)
             self.driver.execute_script(" document.querySelector('div[id=\"identifierNext\"]').click(); ")
-            sleep(5)
-            self.driver.save_screenshot(LOG_PATH +user_name +'_login_password.png')
+            sleep(9)
+            self.driver.save_screenshot(LOG_PATH + user_name + '_login_password.png')
             self.driver.find_element_by_xpath('//*[@id="password"]/div[1]/div/div[1]/input').send_keys(password)
             self.driver.find_element_by_xpath('//*[@id="passwordNext"]/content/span').click()
-            sleep(5)
-            log_in_susccesful=True
-        except Exception,e:
-            logger.error(e)       
-            self.driver.save_screenshot(LOG_PATH +user_name +'_login_error.png')
-            error_msg='Could not log in to gmail for account user: {} password: {}'.format(user_name,password)
-            error_msg=error_msg+' please see error image at {}'.format(LOG_PATH +user_name +'_login_error.png')
+            sleep(12)
+            try:
+                img=WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_css_selector('div img'))
+                veryfy_phone_text=img.get_attribute('href')
+                #check if the veryfy phone page shows up
+                if 'signin_tapyes' in veryfy_phone_text or 'embedded' in veryfy_phone_text:
+                    self.save_very_phone_error(user_name)
+            except Exception,e:
+                #logger.error(e, exc_info=True)
+                pass
+            if not fix_veryfy:
+                log_in_susccesful = self.open_compose_mail_page(user_name)
+        except Exception, e:
+            logger.error(e, exc_info=True)       
+            self.driver.save_screenshot(LOG_PATH + user_name + '_login_error.png')
+            error_msg = 'Could not log in to gmail for account user: {} password: {}'.format(user_name, password)
+            error_msg = error_msg + ' please see error image at {}'.format(LOG_PATH + user_name + '_login_error.png')
             logger.error(error_msg)
-            err=error()
-            err.save_error(error_msg+'\n'+str(e))
-        self.driver.save_screenshot(LOG_PATH +user_name + '_login.png')
+            err = error()
+            err.save_error(error_msg + '\n' + str(e))
+        self.driver.save_screenshot(LOG_PATH + user_name + '_login.png')
         return log_in_susccesful
-        
+    
         
     def open_url(self, url):
         self.driver.get(url)
     
-    
-    def logout_to_gmail(self):
-        pass
-    
-    
-    def _send(self,mail):
-        recipients_list=mail.recipients_list
-        user_name=mail.user_name
-        password=mail.password
-        message=mail.message
-        
+
+    def _send(self, single_campaign,slicer):
+        account = single_campaign.account
+        recipients_list = single_campaign.recipients_list
+        message = single_campaign.message
+        user_name = account.user_name
+        password = account.password
+        logger.info('Login to gmail for user: {}'.format(user_name))
         self.open_url(start_url)
-        sleep(5)
-        retry_count=1
+        sleep(10)
+        retry_count = 1
+        log_in_susccesful = self.login_to_gmail(user_name, password)
         for retry in range(retry_count):
-            log_in_susccesful=self.login_to_gmail(user_name,password)  #####change how we check success
+            log_in_susccesful = self.login_to_gmail(user_name, password)
             if log_in_susccesful:
                 break
             self.tear_down()
             sleep(15)
+            self.__init__()
             self.open_url(start_url)
-            sleep(5)
-            self.login_to_gmail(user_name,password)
+            sleep(10)
+            log_in_susccesful=self.login_to_gmail(user_name, password)
+          
+        try:
+            if  log_in_susccesful:
+                sleep(10)
+                bcc = ''
+                if len(recipients_list) > 1:
+                    for x in range(1, len(recipients_list)):
+                        if len(bcc)==0:
+                            bcc = bcc + recipients_list[x].email
+                        else:
+                            bcc = bcc + ',' + recipients_list[x].email
+                    WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_css_selector('input#bcc')).send_keys(bcc)
+                sleep(5)
+                WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_css_selector('textarea#to')).send_keys(recipients_list[0].email)
+                sleep(5)
+                WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//textarea[@title="Message Body"]')).send_keys(message)
+                sleep(10)
+                logger.info('Sending mail') 
+                self.driver.execute_script("document.querySelector('input[value=\"Send\"]').click(); ")
+    #             self.driver.find_element_by_xpath('//*[@id="password"]/div[1]/div/div[1]/input').send_keys(password)
+    #             self.driver.find_element_by_xpath("//input[@value='Send')]").click()
+                sleep(20)
+                self.driver.find_element_by_xpath("//*[contains(text(), 'Sign out')]").click() 
+                acc_update=account_dao()
+                for inx in range(len(slicer.acounts_list_to_use)):
+                    if account==slicer.acounts_list_to_use[inx]:
+                        replace_ment_acc=slicer.acounts_list_to_use[inx]
+                        incremented_send_val=slicer.acounts_list_to_use[inx].total_sent+len(recipients_list) #update the amount of mails an account has sent today
+                        replace_ment_acc.total_sent=incremented_send_val
+                        acc_update.update(replace_ment_acc)
+                        slicer.acounts_list_to_use[inx]=replace_ment_acc
+                recip_dao=recipient_dao()
+                for inx in range(len(recipients_list)):
+                    recip_dao.update(recipients_list[inx]) #update that recipient was sent email
+            else:
+                slicer.pending_mails=True
+                for x in range(len(recipients_list)):
+                    slicer.pending_recipients_list.append(recipients_list[x])
+                # #return to pending queue coz it did not send
+                pass
+        except Exception,e:    
+            self.driver.save_screenshot(LOG_PATH + user_name + 'mail_compose_error.png')
+            error_msg = 'Error during mail composition for account user: {}'.format(user_name, password)
+            error_msg = error_msg + ' please see error image at {}'.format(LOG_PATH + user_name + 'mail_compose_error.png')
+            logger.error(error_msg,exc_info=True)
+            err = error()
+            err.save_error(error_msg + '\n' + str(e))
+        self.driver.save_screenshot(LOG_PATH + user_name + 'mail_compose.png')
         
         
-    def send_mail(self,recipients_list, account_list, account_threashhold):
-        slicer=mails_slicer()
-        slicer.slice(recipients_list, account_list, account_threashhold)
+    def _loop_send_list(self, accountList_to_recipientsList_map, message,slicer):
+        logger.debug("Type of accout_list given {}".format(type(accountList_to_recipientsList_map)))
+        logger.info('Extracting account and recipients to send after slicing')
+        send_count=1
+        for account, recipient in accountList_to_recipientsList_map.iteritems():
+            single_camp = single_campaign(account, recipient, message)
+            if send_count==1:# to close allow to close browser for every mail sent with one account and sleep for 260 secs thereafter
+                self._send(single_camp,slicer)
+                send_count=send_count+1
+                self.tear_down()
+            else:
+                self.__init__()
+                self._send(single_camp,slicer)
+                sleep(10)
+                self.tear_down()
+                sleep(260)
+                
+            
+    def send_mail(self, recipients_list, account_list, account_threashhold, message):
+        logger.info('Processing mail slicing')
+        slicer = mails_slicer(account_list,account_threashhold)
+        logger.debug('Created mail slicer object')
+        accountList_to_recipientsList_map = slicer.slice(recipients_list, account_list)
+        logger.debug("The acc-recip_list map has {}".format(accountList_to_recipientsList_map))
+        if len(accountList_to_recipientsList_map)!=0:
+            logger.info('Sending mail from mail slicer')
+            self._loop_send_list(accountList_to_recipientsList_map, message,slicer)
+        logger.info('Check if pending mails')
+        logger.info('Pending status: {}'.format(slicer.pending_mails))
         while slicer.pending_mails:
-            mail=slicer.get_next_campaign()
-            self._send(mail)
-        
-        
-    def read_accounts_list(self,account_list):
-        try:                
+            logger.info('Fetching pending mails')
+            accountList_to_recipientsList_map = slicer.get_next_campaign()
+            if len(accountList_to_recipientsList_map)==0:
+                break            
+            logger.info('Sending pending mails')
+            self._loop_send_list(accountList_to_recipientsList_map, message,slicer)
+
+
+    def read_accounts_list(self, account_list,campaign_id):
+        try:       
+            accounts=[]
+            acc_dao=account_dao()
             with open(account_list) as csvfile:
                 readCSV = csv.reader(csvfile)
                 for row in readCSV:
-                    print(row[0] +' '+row[1])
-            self.accounts[row[0]]=row[1]
-            self.recipients=[]
-        except Exception,e:
-            err=error()
-            err.save_error('Failed to read accounts list file \n'+str(e))
+                    acc=account(row[0],row[1])
+                    acc.campaign_id=campaign_id
+                    acc_dao.save(acc)
+                    accounts.append(acc)
+            return accounts
+        except Exception, e:
+            logger.error(e, exc_info=True)
+            err = error()
+            err.save_error('Failed to read accounts list file \n' + str(e))
     
     
-    def read_recepients_list(self,recipients_list):
-        try:                
+    def read_recepients_list(self, recipients_list,campaign_id):
+        try:     
+            recipients=[]           
             with open(recipients_list) as csvfile:
                 readCSV = csv.reader(csvfile)
                 for row in readCSV:
-                    self.recipients.append(row[0])
-        except Exception,e:
+                    rcp=recipient()
+                    rcp.campaign_id=campaign_id
+                    rcp.email=row[0]
+                    recipients.append(rcp)
+                    rcp_dao=recipient_dao()
+                    rcp_dao.save(rcp)
+            return recipients
+        except Exception, e:
             logger.error('Failed to read recipients list file {}')
-            Logger.error(e)
-            err=error()
-            err.save_error('Failed to read recipients list file \n'+str(e))
-        
+            logger.error(e, exc_info=True)
+            err = error()
+            err.save_error('Failed to read recipients list file \n' + str(e))
 
     def tear_down(self):
         logger.info("terminating gmailmassmailer crawler, shutting down web driver")
-        self.driver.quit()
+        # self.driver.quit()
     
     
 class mails_slicer:
 
-    def __init__(self,accounts_list):
-        self.accounts_list
-        self.pending_recipients_list=[]
-        self.acounts_list_to_use=[]
-        self.pending_mails=False
-        self.account_threashhold=1
-        self.campaingn_to_use
+    def __init__(self, accounts_list,account_threashhold):
+        self.accounts_list = accounts_list
+        self.pending_recipients_list = []
+        self.acounts_list_to_use = accounts_list
+        self.pending_mails = False
+        self.account_threashhold = account_threashhold
 
-    def _allocate_recipients_to_account(self,account_list,account_threashhold,recipients_list):
+
+    def _allocate_recipients_to_account(self, account_list, account_threashhold, recipients_list):
         '''
             allocates each account recipients for mail with each account allocated a maximum recipients - account_threashhold
         '''
-        campaingn_to_use={}
+        campaingn_to_use = {}
         for account in account_list:
-            campaingn_to_use[account]=recipients_list[-account_threashhold:]
-            recipients_list=recipients_list[:-account_threashhold]
-        self.pending_recipients_list=recipients_list
+            total_sent=account.total_sent
+            logger.info('Total sent for account {} is: {}'.format(account.user_name,total_sent))
+            #500 is gmails fixed recipients per day
+            recipients_to_add=GMAIL_SEND_LIMIT-(total_sent+1)
+            logger.info("space remaining for extra recipients {}".format(recipients_to_add))
+            if recipients_to_add>=account_threashhold:
+                campaingn_to_use[account] = recipients_list[-account_threashhold:]
+                recipients_list = recipients_list[:-account_threashhold]
+            elif recipients_to_add<account_threashhold and recipients_to_add!=0:
+                campaingn_to_use[account] = recipients_list[-recipients_to_add:]
+                recipients_list = recipients_list[:-recipients_to_add]
+            else:
+                self.acounts_list_to_use.remove(account)
+        logger.info('Recipients list length after allocation to accounts {}'.format(len(recipients_list)))
+        self.pending_recipients_list = recipients_list
         return campaingn_to_use
-        
     
-    def slice(self,recipients_list,account_list,account_threashhold):
+    
+    def remove_exhausted_accounts(self,acct_list):
+        pass
+    
+    
+    def slice(self, recipients_list, account_list):
         '''
-            custom mail slicing algorihtm
+            custom mail slicing algorithm
         '''
-        R=len(recipients_list)
-        A=len(account_list)
-        M=account_threashhold
-        self.account_threashhold=account_threashhold
+        R = len(recipients_list)
+        A = len(account_list)
+        M = self.account_threashhold
         
-        RA=R/A #recipeients per account
         
-        if RA>M:
-            XD=(RA-M)*A # XD is number of total recipients that will be pushed to pending  list
-            if XD>M:
-                self.campaingn_to_use=self._allocate_recipients_to_account(account_list,account_threashhold,recipients_list)
-                self.pending_mails=True
+        logger.info('Recipients list length: {}'.format(R))
+        logger.info('Accounts list length: {}'.format(A))
+        logger.info('Account_threashhold list length: {}'.format(M))
+        
+        RA = R / A  # recipeients per account
+        
+        if RA > M:  # if recipient per account greater than account threashhold
+            
+            XD = (RA - M) * A  # XD is the number  recipients that wount fit in account to be sent thus will be pushed to pending
+            if XD > M:
+                campaingn_to_use = self._allocate_recipients_to_account(account_list, self.account_threashhold, recipients_list)
+                if(len(self.pending_recipients_list)==0 or len(self.acounts_list_to_use)==0):
+                    self.pending_mails = False
+                else:
+                    self.pending_mails = True
+                return campaingn_to_use
                 # allocate accounts max no(M) equally and mark not finished 
                 # send() -  emails
-            elif XD<=M:
-                if len(self.accounts_list)-len(self.acounts_list_to_use) > 0:
+            elif XD <= M:
+                if len(account_list) - len(self.accounts_list) != 0:
+                    logger.info("There exists unused accounts, allocating remaining recipients, send list now empty")
                     for acc in self.accounts_list:
-                        if acc not in self.acounts_list_to_use:
+                        if acc not in account_list:
                             self.acounts_list_to_use.append(acc)
                             break
-                    self.campaingn_to_use=self._allocate_recipients_to_account(account_list,account_threashhold,self.acounts_list_to_use)
-                    return self.campaingn_to_use
-                    # allocate remaining recipeints
-                    #send()  - emails
+                    campaingn_to_use = self._allocate_recipients_to_account(self.acounts_list_to_use, self.account_threashhold, recipients_list)
+                    if(len(self.pending_recipients_list)==0 or len(self.acounts_list_to_use)==0):
+                        self.pending_mails = False
+                    else:
+                        self.pending_mails = True
+                    return campaingn_to_use
+                    # check if we have unused account and add to accounts to be used for sending mail  
+                    # send()  - emails
                 else:
-                    self.campaingn_to_use=self._allocate_recipients_to_account(account_list,account_threashhold,recipients_list)
-                    self.pending_mails=True
+                    logger.info("No unused accounts, allocating & putting remaining in pending list")
+                    campaingn_to_use = self._allocate_recipients_to_account(account_list, self.account_threashhold, recipients_list)
+                    if(len(self.pending_recipients_list)==0 or len(self.acounts_list_to_use)==0):
+                        self.pending_mails = False
+                    else:
+                        self.pending_mails = True
+                    return campaingn_to_use
                     # allocate accounts max no(M) equally and mark not finished
-                    #send()  - emails
-        if RA<=M:
-            if len(self.acounts_list_to_use) != 1:
-                self.acounts_list_to_use=self.acounts_list_to_use[:len(self.acounts_list_to_use)-1]
-                self.slice(recipients_list,self.acounts_list_to_use,account_threashhold)
-                #  recurse - recusrion
+                    # send()  - emails
+        if RA <= M:
+            if len(account_list) != 1:
+                logger.info("Recipients to send can fit in less accounts, splicing account list & Recursing mail sclicer")
+                self.acounts_list_to_use = self.acounts_list_to_use[:len(self.acounts_list_to_use) - 1]
+                campaingn_to_use = self.slice(recipients_list, self.acounts_list_to_use)
+                return campaingn_to_use
+                #  recurse - recusrion # if recipients to send is less or equal a singles account threshhold, then strip accounts & remain with one for sending 
                 # can
             else:
-                self.campaingn_to_use=self._allocate_recipients_to_account(account_list,account_threashhold,recipients_list)
-                return self.campaingn_to_use
-                #send()
+                logger.info("Recipients to send can fit in accounts, send  list now empty")
+                campaingn_to_use = self._allocate_recipients_to_account(account_list, self.account_threashhold, recipients_list)
+                logger.debug("The map has 1 {}".format(campaingn_to_use))
+                if(len(self.pending_recipients_list)==0 or len(self.acounts_list_to_use)==0):
+                    self.pending_mails = False
+                else:
+                    self.pending_mails = True
+                
+
+                return campaingn_to_use
+                # send()
                 
     def get_next_campaign(self):
-        self.slice(self.pending_recipients_list, self.acounts_list_to_use, self.account_threashhold)
-        return self.campaingn_to_use
+        campaingn_to_use = self.slice(self.pending_recipients_list, self.acounts_list_to_use)
+        return campaingn_to_use
 
 
-def start_campaign(recipients_list, account_list, account_threashhold):
-    
-    if not os.path.isdir(LOG_PATH):
-        try:
-            os.mkdir(LOG_PATH)                
-        
-        except Exception, e:
-            pass
-    
-    log_file = "gmailmailer.log"
-    full_pth = os.path.join(LOG_PATH, log_file)
+def start_campaign(recipients_list, account_list, account_threashhold, message):
     
     try:
-
-        if os.path.isdir(LOG_PATH):
-
-            fh = logging.handlers.RotatingFileHandler(full_pth, maxBytes=5242880, backupCount=5)
-            fh.setFormatter(formatter)
-            ch = logging.StreamHandler()
-            ch.setLevel(logging.DEBUG)
-            ch.setFormatter(formatter)
-            logger.addHandler(ch)
-            logger.addHandler(fh)
-
-        else:
-            
-            fh = logging.handlers.RotatingFileHandler(log_file, maxBytes=5242880, backupCount=5)
-            fh.setFormatter(formatter)
-            ch = logging.StreamHandler()
-            ch.setLevel(logging.DEBUG)
-            ch.setFormatter(formatter)
-            logger.addHandler(ch)
-            logger.addHandler(fh)
-        
         logger.info("Crawler started") 
         gmail = Gmail()
-        gmail.send_mail(recipients_list, account_list, account_threashhold)
+        camp=campaign_dao()
+        campaign_id=camp.create_new_campaign()
+        msg=message_dao()
+        msg.save(message[0], campaign_id)
+        recipients_lt=gmail.read_recepients_list(recipients_list,campaign_id)
+        account_lt=gmail.read_accounts_list(account_list,campaign_id)
+        gmail.send_mail(recipients_lt, account_lt, account_threashhold, message)
         
         gmail.driver.save_screenshot(LOG_PATH + 'end.png')
-        sleep(120)
+        sleep(30)
     except Exception as e:
-        logger.error(e)
+        logger.error(e, exc_info=True)
         logger.error(e, exc_info=True)
     finally:
         gmail.tear_down()
+        
         
         
