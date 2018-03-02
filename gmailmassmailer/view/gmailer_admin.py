@@ -11,8 +11,6 @@ from setuptools.command.easy_install import sys_executable
 parentdir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.sys.path.insert(0, parentdir) 
 from controller.control import controller
-from service.crawler import LOG_PATH
-
 
 logger = logging.getLogger(__name__)
 
@@ -49,37 +47,37 @@ def print_help_text():
     print '* if account_threashold is not specified, gmailer uses google maximum threashold which is 50\n'
 
 
-command=''
+command = ''
 recipient_list = ''
 accounts_file = ''
-account_threashold=0
+account_threashold = 0
 message_file = ''
-message_file_given=False
+message_file_given = False
 try:
     command = sys.argv[1] 
     recipient_list = sys.argv[2]    
     accounts_file = sys.argv[3]
     message_file = sys.argv[4]
-    account_threashold=sys.argv[5]
+    account_threashold = sys.argv[5]
 except IndexError:
     pass
 
-
-if len(command)==0:
+if len(command) == 0:
     print_help_text()
     sys.exit()
-elif command=='verify':
-    cont=controller()        
-    user_name=recipient_list
+elif command == 'verify':
+    cont = controller()        
+    user_name = recipient_list
     password = accounts_file
     if len(user_name.strip()) == 0 or len(password.strip()) == 0 :
-        print '\nplease check the provided credentials are correct\n'
+        print '\nPlease check the provided credentials are correct\n'
+        print 'The syntax should be: gmailer verify {user_name} {password} without the braces\n'
         sys.exit()
     cont.fix_google_phone_very(user_name, password)
-elif command.strip()=='help': 
+elif command.strip() == 'help': 
     print_help_text()
     sys.exit()
-elif command.strip()=='mail':
+elif command.strip() == 'mail':
     if len(recipient_list.strip()) == 0 or len(accounts_file) == 0 :
         print_help_text()
         sys.exit()
@@ -98,20 +96,20 @@ elif command.strip()=='mail':
         else:
             print 'Could not read accounts file given'   
     
-        if len(message_file)!=0:
+        if len(message_file) != 0:
             if os.path.exists(message_file):
                 print 'Message file found: {}'.format(os.path.basename(accounts_file))
                 if not os.access(message_file, os.R_OK):               
                     sys.exit()
-                message_file_given=True
+                message_file_given = True
             else:
                 print 'Could not read message file given'   
-        cont=controller()
+        cont = controller()
         cont.add_recipients(recipient_list)
         cont.add_accounts(accounts_file)
         if message_file_given:
             cont.set_mail_message(message_file)
-        if account_threashold!=0:
+        if account_threashold != 0:
             cont.set_account_threshhold(account_threashold)
         cont.start_crawler()  
     except Exception, e:

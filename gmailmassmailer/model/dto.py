@@ -24,6 +24,7 @@ class account:
         self.password=password
         self.total_sent=0
         self.campaign_id=0
+        self.verify=0 #if marked 0, this account needs to be verify, the crwaler is unable to login using it
         
 class campaign:
     

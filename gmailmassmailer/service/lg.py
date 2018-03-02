@@ -35,7 +35,7 @@ else:
     fh = logging.handlers.RotatingFileHandler(log_file, maxBytes=5242880, backupCount=5)
        
 
-fh.setLevel(logging.DEBUG)
+fh.setLevel(logging.INFO)
 ch = logging.StreamHandler(sys.stdout)
 ch.setLevel(logging.INFO)
 fh.setFormatter(formatter)
