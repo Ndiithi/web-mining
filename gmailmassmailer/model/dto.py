@@ -10,6 +10,7 @@ class single_campaign:
         self.account=account
         self.recipients_list=recipients_list
         self.message=message
+        self.subject=''
         
 class multi_campaign:
     

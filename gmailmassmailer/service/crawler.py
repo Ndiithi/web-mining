@@ -39,6 +39,7 @@ class Gmail:
         if not verify:
             options.add_argument("--headless")
             options.add_argument('--disable-gpu')
+        
         options.add_argument("--log-level=3");
         options.add_argument("--silent");
         options.add_argument('--no-sandbox')
@@ -240,6 +241,7 @@ class Gmail:
         message = single_campaign.message
         user_name = account.user_name
         password = account.password
+        subject=single_campaign.subject
         logger.info('Login to gmail for user: {}'.format(user_name))
         self.open_url(start_url)
         sleep(10)
@@ -273,6 +275,8 @@ class Gmail:
                     WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_css_selector('input#bcc')).send_keys(bcc)
                 sleep(5)
                 WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_css_selector('textarea#to')).send_keys(recipients_list[0].email)
+                sleep(5)
+                WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//input[@name="subject"]')).send_keys(subject)
                 sleep(5)
                 WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//textarea[@title="Message Body"]')).send_keys(message)
                 sleep(10)
@@ -317,12 +321,13 @@ class Gmail:
             err.save_error(error_msg + '\n' + str(e))
         self.driver.save_screenshot(LOG_PATH + user_name + 'mail_compose.png')
         
-    def _loop_send_list(self, accountList_to_recipientsList_map, message, slicer):
+    def _loop_send_list(self, accountList_to_recipientsList_map, message, slicer,subject):
         logger.debug("Type of accout_list given {}".format(type(accountList_to_recipientsList_map)))
         logger.info('Extracting account and recipients to send after slicing')
         
         for account, recipient in accountList_to_recipientsList_map.iteritems():
             single_camp = single_campaign(account, recipient, message)
+            single_camp.subject=subject
             if self.send_count == 1:  # to close allow to close browser for every mail sent with one account and sleep for 260 secs thereafter
                 self._send(single_camp, slicer)
                 self.send_count = self.send_count + 1
@@ -343,7 +348,7 @@ class Gmail:
             self.fix_unusable_accounts() #checks every other time if accounts previously marked as unusable are respolved
             logger.debug('Finished looping on list to send')
             
-    def send_mail(self, recipients_list, account_list, account_threashhold, message):
+    def send_mail(self, recipients_list, account_list, account_threashhold, message,subject):
         logger.info('Processing mail slicing')
         self.slicer=mails_slicer(account_list, account_threashhold)
         slicer = self.slicer
@@ -352,7 +357,7 @@ class Gmail:
         logger.debug("The acc-recip_list map has {}".format(accountList_to_recipientsList_map))
         if len(accountList_to_recipientsList_map) != 0:
             logger.info('Sending mail from mail slicer')
-            self._loop_send_list(accountList_to_recipientsList_map, message, slicer)
+            self._loop_send_list(accountList_to_recipientsList_map, message, slicer,subject)
             logger.debug('Return from _loop_send_list method call')
         logger.info('Check if pending mails')
         logger.info('Pending status: {}'.format(slicer.pending_mails))
@@ -376,7 +381,7 @@ class Gmail:
                 logger.info('All accounts maximum limit reached while unsent mails exist')
                 break            
             logger.info('Sending pending mails')
-            self._loop_send_list(accountList_to_recipientsList_map, message, slicer)
+            self._loop_send_list(accountList_to_recipientsList_map, message, slicer,subject)
 
 
     def read_accounts_list(self, account_list, campaign_id):
@@ -541,7 +546,7 @@ class mails_slicer:
 
 
 
-def start_campaign(recipients_list, account_list, account_threashhold, message):
+def start_campaign(recipients_list, account_list, account_threashhold, message, subject):
     try:
         logger.info("Crawler started") 
         gmail = Gmail()
@@ -552,7 +557,7 @@ def start_campaign(recipients_list, account_list, account_threashhold, message):
         gmail.campaign_id=campaign_id
         recipients_lt = gmail.read_recepients_list(recipients_list, campaign_id)
         account_lt = gmail.read_accounts_list(account_list, campaign_id)
-        gmail.send_mail(recipients_lt, account_lt, account_threashhold, message)
+        gmail.send_mail(recipients_lt, account_lt, account_threashhold, message,subject)
         logger.info('Finished sending all mails, exiting completely')
         sleep(7)
     except Exception,e:

@@ -79,14 +79,17 @@ class account:
         
         
     def update_verify(self,account):
-        user_name=account.user_name
-        password=account.password
-        verify=account.verify
-        logger.info('Updating verify state for account name: {} to verify value: {}'.format(user_name,verify))
-        dbcon=dbConnection()
-        cur = dbcon.get_cursor()
-        cur.execute("update Account set verify=? where  user_name=? and password=?", (verify,user_name,password))
-        dbcon.commit()
+        try:
+            user_name=account.user_name
+            password=account.password
+            verify=account.verify
+            logger.info('Updating verify state for account name: {} to verify value: {}'.format(user_name,verify))
+            dbcon=dbConnection()
+            cur = dbcon.get_cursor()
+            cur.execute("update Account set verify=? where  user_name=? and password=?", (verify,user_name,password))
+            dbcon.commit()
+        except Exception,e:
+            logger.error(e)
         
         
 class recipient:

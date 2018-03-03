@@ -11,7 +11,8 @@ class controller:
     def __init__(self):
         self.message = None
         self.account_threshhold = 50
-    
+        self.subject=''
+        
     def add_recipients(self, f):
         self.recipient_file = f
     
@@ -23,7 +24,7 @@ class controller:
         self.accounts_file = f
     
     def start_crawler(self):
-        start_campaign(self.recipient_file, self.accounts_file, self.account_threshhold, self.message)
+        start_campaign(self.recipient_file, self.accounts_file, self.account_threshhold, self.message,self.subject)
 
     def stop_crawler(self):
         pass
@@ -38,6 +39,9 @@ class controller:
         ''' 
         pass
     
+    def set_subject(self,subject):
+        self.subject=subject
+    
     def set_account_threshhold(self, threshhold):
         try:
             if int(threshhold) > 50 or int(threshhold) <= 0:
@@ -51,10 +55,10 @@ class controller:
         try:
             from time import sleep
             acc = account(user_name, password)
+            acc.verify=0
             gmail_obj = Gmail(verify=True)
             gmail_obj.open_url(start_url)
             gmail_obj.login_to_gmail(acc,fix_veryfy=True)
-            acc.verify=0
             acc_dao=account_dto()
             acc_dao.update_verify(acc)
             print 'Account returned to usable accounts list now'
