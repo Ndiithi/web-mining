@@ -10,7 +10,7 @@ class controller:
     
     def __init__(self):
         self.message = None
-        self.account_threshhold = 50
+        self.account_threshhold = 49
         self.subject=''
         
     def add_recipients(self, f):
@@ -44,8 +44,8 @@ class controller:
     
     def set_account_threshhold(self, threshhold):
         try:
-            if int(threshhold) > 50 or int(threshhold) <= 0:
-                print 'account_threshhold provided not permited, defaulting to 50' 
+            if int(threshhold) > self.account_threshhold or int(threshhold) <= 0:
+                print 'account_threshhold provided not permited, defaulting to 49' 
             else:
                 self.account_threshhold = int(threshhold)
         except Exception:

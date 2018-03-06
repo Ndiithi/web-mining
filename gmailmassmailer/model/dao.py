@@ -104,10 +104,13 @@ class recipient:
         dbcon.commit()
     
     def update(self,recipient):
-        dbcon=dbConnection()
-        cur = dbcon.get_cursor()
-        cur.execute("update recipient set sent_status=?  where email=? and campaign=?", (1,recipient.email,recipient.campaign_id))
-        dbcon.commit()
+        try:
+            dbcon=dbConnection()
+            cur = dbcon.get_cursor()
+            cur.execute("update recipient set sent_status=?  where email=? and campaign=?", (1,recipient.email,recipient.campaign_id))
+            dbcon.commit()
+        except Exception:
+            pass
 
 
 class campaign:

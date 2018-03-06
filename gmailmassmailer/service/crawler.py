@@ -1,6 +1,7 @@
 from time import sleep
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common import action_chains, keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException
 import csv
@@ -8,12 +9,14 @@ import os
 import logging
 from model.dto import account
 from service import lg
-from model.dao import account as account_dao
+from model.dao import account as account_dao, logger
 from model.dao import campaign as campaign_dao
 from model.dao import message as message_dao
 from model.dto import recipient
 from model.dao import recipient as recipient_dao
 import sys
+from pip.utils.outdated import SELFCHECK_DATE_FMT
+from logging import Logger
 
 
 
@@ -37,7 +40,7 @@ class Gmail:
         options = webdriver.ChromeOptions()
         options.add_argument('--ignore-certificate-errors')
         if not verify:
-            options.add_argument("--headless")
+            #options.add_argument("--headless")
             options.add_argument('--disable-gpu')
         
         options.add_argument("--log-level=3");
@@ -235,7 +238,7 @@ class Gmail:
     def open_url(self, url):
         self.driver.get(url)
 
-    def _send(self, single_campaign, slicer):
+    def _send(self, single_campaign, slicer,is_forward):
         account = single_campaign.account
         recipients_list = single_campaign.recipients_list
         message = single_campaign.message
@@ -250,7 +253,7 @@ class Gmail:
         if not log_in_susccesful:
             retry_count = 2
             for retry in range(retry_count):
-                logger.info('login not successfull, retry count ={}'.format(retry+1))
+                logger.info('login not successful, retry count ={}'.format(retry+1))
                 self.tear_down()
                 sleep(60)
                 self.__init__()
@@ -265,27 +268,36 @@ class Gmail:
         try:
             if  log_in_susccesful:
                 sleep(10)
-                bcc = ''
-                if len(recipients_list) > 1:
-                    for x in range(1, len(recipients_list)):
-                        if len(bcc) == 0:
-                            bcc = bcc + recipients_list[x].email
-                        else:
-                            bcc = bcc + ',' + recipients_list[x].email
-                    WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_css_selector('input#bcc')).send_keys(bcc)
-                sleep(5)
-                WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_css_selector('textarea#to')).send_keys(recipients_list[0].email)
-                sleep(5)
-                WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//input[@name="subject"]')).send_keys(subject)
-                sleep(5)
-                WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//textarea[@title="Message Body"]')).send_keys(message)
-                sleep(10)
-                logger.info('Sending mail') 
-                self.driver.execute_script("document.querySelector('input[value=\"Send\"]').click(); ")
-    #             self.driver.find_element_by_xpath('//*[@id="password"]/div[1]/div/div[1]/input').send_keys(password)
-    #             self.driver.find_element_by_xpath("//input[@value='Send')]").click()
+                
+                if is_forward:
+                    # url to switch to basic view after login
+                    logger.info('Switching to standard view')
+                    self.open_url('https://mail.google.com/mail/u/0/?nocheckbrowser')
+                    sleep(15)
+                    self.forward_mail(single_campaign)
+                else:
+                    bcc = ''
+                    if len(recipients_list) > 1:
+                        for x in range(1, len(recipients_list)):
+                            if len(bcc) == 0:
+                                bcc = bcc + recipients_list[x].email
+                            else:
+                                bcc = bcc + ',' + recipients_list[x].email
+                        WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_css_selector('input#bcc')).send_keys(bcc)
+                    sleep(5)
+                    WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_css_selector('textarea#to')).send_keys(recipients_list[0].email)
+                    sleep(5)
+                    WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//input[@name="subject"]')).send_keys(subject)
+                    sleep(5)
+                    WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//textarea[@title="Message Body"]')).send_keys(message)
+                    sleep(10)
+                    logger.info('Sending mail') 
+                    self.driver.execute_script("document.querySelector('input[value=\"Send\"]').click(); ")
                 sleep(20)
-                self.driver.find_element_by_xpath("//*[contains(text(), 'Sign out')]").click() 
+                try:
+                    self.driver.find_element_by_xpath("//*[contains(text(), 'Sign out')]").click() 
+                except Exception:
+                    pass
                 sleep(7)
                 acc_update = account_dao()
                 logger.info('Updating account on total remaining recipients spaces to use')
@@ -321,15 +333,15 @@ class Gmail:
             err.save_error(error_msg + '\n' + str(e))
         self.driver.save_screenshot(LOG_PATH + user_name + 'mail_compose.png')
         
-    def _loop_send_list(self, accountList_to_recipientsList_map, message, slicer,subject):
+    def _loop_send_list(self, accountList_to_recipientsList_map, message, slicer,subject,is_forward):
         logger.debug("Type of accout_list given {}".format(type(accountList_to_recipientsList_map)))
         logger.info('Extracting account and recipients to send after slicing')
         
         for account, recipient in accountList_to_recipientsList_map.iteritems():
             single_camp = single_campaign(account, recipient, message)
             single_camp.subject=subject
-            if self.send_count == 1:  # to close allow to close browser for every mail sent with one account and sleep for 260 secs thereafter
-                self._send(single_camp, slicer)
+            if self.send_count == 1:  # if this is first send count, do not call constructor;;;; to close browser for every mail(s) sent with one account and sleep for 260 secs thereafter
+                self._send(single_camp, slicer,is_forward)
                 self.send_count = self.send_count + 1
                 logger.info('Tearing down crawler')
                 self.tear_down()
@@ -339,7 +351,7 @@ class Gmail:
                 logger.info('Reinitializing sequence, initializing parameters')
                 self.__init__()
                 sleep(4)
-                self._send(single_camp, slicer)
+                self._send(single_camp, slicer,is_forward)
                 logger.info('Tearing down crawler')
                 self.tear_down()
                 self.send_count = self.send_count + 1
@@ -348,7 +360,7 @@ class Gmail:
             self.fix_unusable_accounts() #checks every other time if accounts previously marked as unusable are respolved
             logger.debug('Finished looping on list to send')
             
-    def send_mail(self, recipients_list, account_list, account_threashhold, message,subject):
+    def send_mail(self, recipients_list, account_list, account_threashhold, message,subject,is_forward):
         logger.info('Processing mail slicing')
         self.slicer=mails_slicer(account_list, account_threashhold)
         slicer = self.slicer
@@ -357,7 +369,7 @@ class Gmail:
         logger.debug("The acc-recip_list map has {}".format(accountList_to_recipientsList_map))
         if len(accountList_to_recipientsList_map) != 0:
             logger.info('Sending mail from mail slicer')
-            self._loop_send_list(accountList_to_recipientsList_map, message, slicer,subject)
+            self._loop_send_list(accountList_to_recipientsList_map, message, slicer,subject,is_forward)
             logger.debug('Return from _loop_send_list method call')
         logger.info('Check if pending mails')
         logger.info('Pending status: {}'.format(slicer.pending_mails))
@@ -381,17 +393,21 @@ class Gmail:
                 logger.info('All accounts maximum limit reached while unsent mails exist')
                 break            
             logger.info('Sending pending mails')
-            self._loop_send_list(accountList_to_recipientsList_map, message, slicer,subject)
+            self._loop_send_list(accountList_to_recipientsList_map, message, slicer,subject,is_forward)
 
 
-    def read_accounts_list(self, account_list, campaign_id):
+    def read_accounts_list(self, account_list, campaign_id,is_forward_campaign):
         try:       
             accounts = []
             acc_dao = account_dao()
             with open(account_list) as csvfile:
                 readCSV = csv.reader(csvfile)
                 for row in readCSV:
-                    acc = account(row[0], row[1])
+                    if is_forward_campaign:
+                        acc = account(row[0], row[1])
+                        acc.forward_from=row[2]
+                    else:
+                        acc = account(row[0], row[1])
                     acc.campaign_id = campaign_id
                     was_account_save=acc_dao.save(acc)
                     if was_account_save:
@@ -400,7 +416,12 @@ class Gmail:
         except Exception, e:
             logger.error(e, exc_info=True)
             err = error()
-            err.save_error('Failed to read accounts list file \n' + str(e))
+            if is_forward_campaign:
+                err.save_error('Failed to read accounts list file, check if the columns are three \n' + str(e))
+                logger.error('Failed to read accounts list file, check if the columns are three')
+            else:
+                err.save_error('Failed to read accounts list file \n' + str(e))
+            sys.exit()
     
     def read_recepients_list(self, recipients_list, campaign_id):
         try:     
@@ -420,11 +441,102 @@ class Gmail:
             logger.error(e, exc_info=True)
             err = error()
             err.save_error('Failed to read recipients list file \n' + str(e))
-
+            sys.exit()
+            
     def tear_down(self):
         logger.info("terminating gmailmassmailer crawler, shutting down web driver")
         self.driver.quit()
+     
+     
+     
+    #------------------------------------------------------------------------------------------------------
+    # Mail forward specific functions
+    #------------------------------------------------------------------------------------------------------    
     
+    
+    def forward_mail(self,single_campaign):
+        account = single_campaign.account
+        recipients_list = single_campaign.recipients_list
+        subject=single_campaign.subject
+        account.user_name # same as self.email_of_forwarder.user_name
+        
+        if self.forward_stared:
+            try:
+                logger.info('selecting stared mail to forward to accounts')    
+                self.driver.find_element_by_xpath("//a[contains(text(), 'Starred')]").click()
+                sleep(10)
+                logger.info('Opening stared mail')
+                first_row=WebDriverWait(self.driver, 10).until(lambda x: x.find_elements_by_xpath('//span[@email="'+self.email_of_forwarder.user_name+'"]/../../following-sibling::td[1]'))
+                self.driver.execute_script('arguments[0].click();',first_row[0])    
+                
+                logger.info('Find forward mail link') 
+                forward_link_spans=WebDriverWait(self.driver, 10).until(lambda x: x.find_elements_by_xpath('//span[text()="Forward"]'))
+                for forward_link in forward_link_spans:
+                    try:
+                        reply_link=forward_link.find_elements_by_xpath('.//preceding-sibling::span[text()="Reply"]')
+                        if len(reply_link)==1:
+                            logger.info('Selecting forward mail link')
+                            forward_link.click()
+                            break
+                    except Exception:
+                        pass
+                sleep(6)
+                WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//textarea[@name="to"]')).send_keys(account.user_name)
+                sleep(5)
+                bcc = ''
+                if len(recipients_list) >= 1:
+                    logger.info('Preparing forward mail recipients')
+                    for x in range(len(recipients_list)):
+                        if len(bcc) == 0:
+                            bcc = bcc + recipients_list[x].user_name
+                        else:
+                            bcc = bcc + ',' + recipients_list[x].user_name
+                    logger.info('list to forward mail to:')
+                    logger.info(bcc)
+                    bcc_link_spans=WebDriverWait(self.driver, 10).until(lambda x: x.find_elements_by_xpath('//span[text()="Bcc"]'))
+                    for bcc_link_span in bcc_link_spans:
+                        try:
+                            if "Recipients" in bcc_link_span.get_attribute('data-tooltip'):
+                                logger.info('Selecting bcc mail link')
+                                bcc_link_span.click()
+                        except Exception:
+                            pass
+                    WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//textarea[@name="bcc"]')).send_keys(bcc)
+                
+                sleep(7)
+                WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//div[text()="Send"]')).click()
+                sleep(5)
+                
+            except Exception, e:
+                logger.debug(e, exc_info=True)       
+                self.driver.save_screenshot(LOG_PATH  + 'forward_stared_error.png')
+                error_msg = 'Error during forwarding stared mail to accounts'
+                error_msg = error_msg + ' please see error image at {}'.format(LOG_PATH + 'forward_stared_error.png')
+                logger.error(error_msg)
+                err = error()
+                err.save_error(error_msg + '\n' + str(e))
+    
+    
+    def prepare_mail_to_forward(self,account_list):
+        message=None
+        subject=None
+        is_forward=True
+        self.forward_stared=True
+        account_threashhold=49
+        logger.info('calling mail slicer for forward item')
+        self.slicer=mails_slicer(account_list, account_threashhold)
+        account_lt=[]
+        recipients_lt=[]
+        
+        for acc in account_list:
+            if len(acc.forward_from.strip())!=0 and int(acc.forward_from)==1:
+                logger.info("Account to forward from found")
+                self.email_of_forwarder=acc
+                account_lt.append(acc)
+            else:
+                recipients_lt.append(acc)
+        self.send_mail(recipients_lt, account_lt, account_threashhold, message,subject,is_forward)    
+        self.forward_stared=False
     
 class mails_slicer:
 
@@ -458,8 +570,6 @@ class mails_slicer:
         self.pending_recipients_list = recipients_list
         return campaingn_to_use
     
-    def remove_exhausted_accounts(self, acct_list):
-        pass
     
     def slice(self, recipients_list, account_list):
         '''
@@ -545,7 +655,6 @@ class mails_slicer:
         return campaingn_to_use
 
 
-
 def start_campaign(recipients_list, account_list, account_threashhold, message, subject):
     try:
         logger.info("Crawler started") 
@@ -553,16 +662,36 @@ def start_campaign(recipients_list, account_list, account_threashhold, message, 
         msg = message_dao()
         camp = campaign_dao()
         campaign_id = camp.create_new_campaign()
-        msg.save(message[0], campaign_id)
+        is_forward_campaign=False
         gmail.campaign_id=campaign_id
         recipients_lt = gmail.read_recepients_list(recipients_list, campaign_id)
-        account_lt = gmail.read_accounts_list(account_list, campaign_id)
-        gmail.send_mail(recipients_lt, account_lt, account_threashhold, message,subject)
+        
+        if message==None:
+            is_forward_campaign=True
+        
+        logger.info('Recipients list processed')
+        account_lt = gmail.read_accounts_list(account_list, campaign_id,is_forward_campaign)
+        
+        logger.info('Accounts list processed')
+        
+        if is_forward_campaign:
+            msg.save("forward", campaign_id)
+            logger.info('Preparing forward item')
+            gmail.prepare_mail_to_forward(account_lt)
+            #increment total_sent from the account that forwareded.
+            for indx  in range(len(account_lt)):
+                if len(account_lt[indx].forward_from.strip())!=0 and int(account_lt[indx].forward_from)==1:
+                    account_lt[indx].total_sent=len(account_lt)
+        else:
+            msg.save(message[0], campaign_id)
+        logger.info('Starting send process, mail is forward? {}'.format(is_forward_campaign))
+        message=''
+        gmail.send_mail(recipients_lt, account_lt, account_threashhold, message,subject,is_forward_campaign)
         logger.info('Finished sending all mails, exiting completely')
         sleep(7)
     except Exception,e:
         pass
-        logger.debug(e, exc_info=True)
+        logger.error(e, exc_info=True)
     finally:
         try:
             gmail.tear_down()

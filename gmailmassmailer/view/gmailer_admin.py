@@ -127,7 +127,7 @@ elif command.strip() == 'mail':
                 print 'Could not read message file given, will forward mail from mailbox'   
         else:
             print 'No message file given, will forward mail from mailbox'   
-            sys.exit()
+            #sys.exit()
             
         cont = controller()
         cont.add_recipients(recipient_list)

@@ -26,6 +26,7 @@ class account:
         self.total_sent=0
         self.campaign_id=0
         self.verify=0 #if marked 0, this account needs to be verify, the crwaler is unable to login using it
+        self.forward_from=0 #if marked 1, when doing a mail forward campaign, this will be the primary account from which the original mail was drafted from
         
 class campaign:
     
