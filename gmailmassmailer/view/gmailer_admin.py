@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Created on Feb 24, 2018
 
@@ -26,7 +27,7 @@ Availble commands: \ngmailer mail {options} \ngmailer report {options} \ngmailer
 options in square brackets '[]' are optional\n
 1. mail command:\n
 ------------------
-gmailer mail -R recipient_list  -A accounts_file -msg [message_file] -thresh [account_threashold] -subject [subject]\n
+gmailer mail -R recipient_list  -A accounts_file -M [message_file] -thresh [account_threashold] -subject [subject]\n
 2. verify\n
 Use this option to manually fix google authentication when phone authentication is required for a single account\n
 syntax: gmailer mail -U user_name -P password\n\n

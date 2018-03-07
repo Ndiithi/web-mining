@@ -1,31 +1,33 @@
-from time import sleep
-from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common import action_chains, keys
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.common.exceptions import TimeoutException
+# -*- coding: utf-8 -*-
 import csv
-import os
-import logging
-from model.dto import account
-from service import lg
-from model.dao import account as account_dao, logger
-from model.dao import campaign as campaign_dao
-from model.dao import message as message_dao
-from model.dto import recipient
-from model.dao import recipient as recipient_dao
-import sys
-from pip.utils.outdated import SELFCHECK_DATE_FMT
 from logging import Logger
+import logging
+import os
+import re
+import sys
+from time import sleep
 
+from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.common import action_chains, keys
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+
+from model.dao import account as account_dao
+from model.dao import campaign as campaign_dao
+from model.dao import error
+from model.dao import message as message_dao
+from model.dao import recipient as recipient_dao
+from model.dto import account
+from model.dto import recipient
+from model.dto import single_campaign
+from service import lg
 
 
 logger = logging.getLogger(__name__)
 
 parentdir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.sys.path.insert(0, parentdir) 
-from model.dao import error
-from model.dto import single_campaign
 
 start_url = 'https://mail.google.com'
 # start_url = 'http://139.59.4.7:8080/settings/'
@@ -40,9 +42,8 @@ class Gmail:
         options = webdriver.ChromeOptions()
         options.add_argument('--ignore-certificate-errors')
         if not verify:
-            #options.add_argument("--headless")
+            options.add_argument("--headless")
             options.add_argument('--disable-gpu')
-        
         options.add_argument("--log-level=3");
         options.add_argument("--silent");
         options.add_argument('--no-sandbox')
@@ -94,8 +95,7 @@ class Gmail:
         except Exception,e:
             logger.debug(e,exc_info=True)
             return fixed
-        
-                            
+            
         
     def open_compose_mail_page(self, user_name):
         log_in_susccesful = False
@@ -235,6 +235,7 @@ class Gmail:
         self.driver.save_screenshot(LOG_PATH + user_name + '_login.png')
         return log_in_susccesful
         
+        
     def open_url(self, url):
         self.driver.get(url)
 
@@ -305,13 +306,19 @@ class Gmail:
                     if account == slicer.acounts_list_to_use[inx]:
                         replace_ment_acc = slicer.acounts_list_to_use[inx]
                         incremented_send_val = slicer.acounts_list_to_use[inx].total_sent + len(recipients_list)  # update the amount of mails an account has sent today
+                        if is_forward:
+                            incremented_send_val=incremented_send_val+1 # it also sent mail to itself during campaing
                         replace_ment_acc.total_sent = incremented_send_val
                         acc_update.update(replace_ment_acc)
                         slicer.acounts_list_to_use[inx] = replace_ment_acc
+                #update both account list to use and the initial account holding all accounts
                 for inx in range(len(slicer.accounts_list)):
                     if account == slicer.accounts_list[inx]:
                         replace_ment_acc = slicer.accounts_list[inx]
-                        incremented_send_val = slicer.accounts_list[inx].total_sent + len(recipients_list)  # update the amount of mails an account has sent today
+                        if is_forward:
+                            incremented_send_val = slicer.accounts_list[inx].total_sent + len(recipients_list)+1# it also sent mail to itself during campaing
+                        else: 
+                            incremented_send_val = slicer.accounts_list[inx].total_sent + len(recipients_list)  # update the amount of mails an account has sent today
                         replace_ment_acc.total_sent = incremented_send_val
                         slicer.accounts_list[inx] = replace_ment_acc
                         
@@ -325,13 +332,26 @@ class Gmail:
                 # #return recipients to pending queue coz it did not send
                 pass
         except Exception, e:    
-            self.driver.save_screenshot(LOG_PATH + user_name + 'mail_compose_error.png')
-            error_msg = 'Error during mail composition for account user: {}'.format(user_name, password)
-            error_msg = error_msg + ' please see error image at {}'.format(LOG_PATH + user_name + '_after_log_in.png')
-            logger.error(error_msg, exc_info=True)
-            err = error()
-            err.save_error(error_msg + '\n' + str(e))
+            if is_forward:
+                slicer.pending_mails = True
+                for x in range(len(recipients_list)):
+                    slicer.pending_recipients_list.append(recipients_list[x])
+                logger.debug(e, exc_info=True)       
+                self.driver.save_screenshot(LOG_PATH  + 'forward_mail_error.png')
+                error_msg = 'Error during forwarding mail'
+                error_msg = error_msg + ' please see error image at {}'.format(LOG_PATH + 'forward_mail_error.png')
+                logger.error(error_msg)
+                err = error()
+                err.save_error(error_msg + '\n' + str(e))
+            else:
+                self.driver.save_screenshot(LOG_PATH + user_name + 'mail_compose_error.png')
+                error_msg = 'Error during mail composition for account user: {}'.format(user_name, password)
+                error_msg = error_msg + ' please see error image at {}'.format(LOG_PATH + user_name + '_after_log_in.png')
+                logger.error(error_msg, exc_info=True)
+                err = error()
+                err.save_error(error_msg + '\n' + str(e))
         self.driver.save_screenshot(LOG_PATH + user_name + 'mail_compose.png')
+        
         
     def _loop_send_list(self, accountList_to_recipientsList_map, message, slicer,subject,is_forward):
         logger.debug("Type of accout_list given {}".format(type(accountList_to_recipientsList_map)))
@@ -359,6 +379,7 @@ class Gmail:
                 sleep(258)
             self.fix_unusable_accounts() #checks every other time if accounts previously marked as unusable are respolved
             logger.debug('Finished looping on list to send')
+            
             
     def send_mail(self, recipients_list, account_list, account_threashhold, message,subject,is_forward):
         logger.info('Processing mail slicing')
@@ -423,6 +444,7 @@ class Gmail:
                 err.save_error('Failed to read accounts list file \n' + str(e))
             sys.exit()
     
+    
     def read_recepients_list(self, recipients_list, campaign_id):
         try:     
             recipients = []           
@@ -447,75 +469,141 @@ class Gmail:
         logger.info("terminating gmailmassmailer crawler, shutting down web driver")
         self.driver.quit()
      
-     
-     
     #------------------------------------------------------------------------------------------------------
     # Mail forward specific functions
     #------------------------------------------------------------------------------------------------------    
-    
     
     def forward_mail(self,single_campaign):
         account = single_campaign.account
         recipients_list = single_campaign.recipients_list
         subject=single_campaign.subject
         account.user_name # same as self.email_of_forwarder.user_name
-        
         if self.forward_stared:
+            logger.info('selecting stared mail to forward to secondary')    
+            self.driver.find_element_by_xpath("//a[contains(text(), 'Starred')]").click()
+            sleep(10)
+            logger.info('Opening stared mail')
+            
+            first_rows=WebDriverWait(self.driver, 10).until(lambda x: x.find_elements_by_xpath('//span[@email="'+self.email_of_forwarder.user_name+'"]/../../following-sibling::td[1]'))
+            for first_row in first_rows:
+                try:
+                    first_sib=first_row.find_elements_by_xpath('.//preceding-sibling::*[span[@title="Starred"]]')
+                    if len(first_sib)>=1:
+                        self.driver.execute_script('arguments[0].click();',first_row) 
+                        break
+                except Exception:
+                    pass
+        else:     
+            logger.info('Opening mail to forward')
+            first_row=WebDriverWait(self.driver, 10).until(lambda x: x.find_elements_by_xpath('//span[@email="'+self.email_of_forwarder.user_name+'"]/../../following-sibling::td[1]'))
+            self.driver.execute_script('arguments[0].click();',first_row[0])    
+        
+        logger.info('Find forward mail link') 
+        forward_link_spans=WebDriverWait(self.driver, 10).until(lambda x: x.find_elements_by_xpath('//span[text()="Forward"]'))
+        for forward_link in forward_link_spans:
             try:
-                logger.info('selecting stared mail to forward to accounts')    
-                self.driver.find_element_by_xpath("//a[contains(text(), 'Starred')]").click()
-                sleep(10)
-                logger.info('Opening stared mail')
-                first_row=WebDriverWait(self.driver, 10).until(lambda x: x.find_elements_by_xpath('//span[@email="'+self.email_of_forwarder.user_name+'"]/../../following-sibling::td[1]'))
-                self.driver.execute_script('arguments[0].click();',first_row[0])    
+                reply_link=forward_link.find_elements_by_xpath('.//preceding-sibling::span[text()="Reply"]')
+                if len(reply_link)==1:
+                    logger.info('Selecting forward mail link')
+                    forward_link.click()
+                    break
+            except Exception:
+                pass
+        sleep(6)
+        
+        WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//textarea[@name="to"]')).send_keys(account.user_name)
+            
+        sleep(5)
+        bcc = ''
+        if len(recipients_list) >= 1:
+            logger.info('Preparing forward mail recipients')
+            for x in range(len(recipients_list)):
+                if len(bcc) == 0:
+                    if self.forward_stared:
+                        bcc = bcc + recipients_list[x].user_name
+                    else:
+                        bcc = bcc + recipients_list[x].email
+                else:
+                    if self.forward_stared:
+                        bcc = bcc + ',' + recipients_list[x].user_name
+                    else:
+                        bcc = bcc + ',' + recipients_list[x].email
+            logger.info('list to forward mail to:')
+            logger.info(bcc)
+            bcc_link_spans=WebDriverWait(self.driver, 10).until(lambda x: x.find_elements_by_xpath('//span[text()="Bcc"]'))
+            for bcc_link_span in bcc_link_spans:
+                try:
+                    if "Recipients" in bcc_link_span.get_attribute('data-tooltip'):
+                        logger.info('Selecting bcc mail link')
+                        bcc_link_span.click()
+                except Exception:
+                    pass
+            for charactr in bcc:
+                WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//textarea[@name="bcc"]')).send_keys(charactr)
+                if charactr==',':
+                    sleep(0.05)
+            sleep(1)
+            WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//textarea[@name="bcc"]')).send_keys(Keys.ENTER)
+        content_elements=WebDriverWait(self.driver, 10).until(lambda x: x.find_elements_by_xpath('//div[@class="gmail_quote"]'))
+        content_element=WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//div[@class="gmail_quote"]'))
+        for text_area in content_elements:
+            parent_content_div=text_area.find_elements_by_xpath('.//parent::div[@aria-label="Message Body"]')
+            if len(parent_content_div)==1:
+                content_element=text_area
+                break
+            
+        forward_mail_html=content_element.get_attribute('innerHTML')
+        match = re.search(r'--+.*<br><br><br>', forward_mail_html)
+        if match:                      
+            logger.info( 'Replacing default forward text by google')
+            forward_mail_html=forward_mail_html.replace(match.group(), '')
+        else:
+            logger.info(  'Default forward text by google not found')
+        self.driver.execute_script("arguments[0].innerHTML = arguments[1];", content_element, forward_mail_html);
+        sleep(5)
+        if self.forward_stared:
+            WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//div[text()="Send"]')).click()
+            sleep(5)
+        else:
+            type_of_response = WebDriverWait(self.driver, 10).until(lambda x: x.find_elements_by_xpath('//div[@aria-label="Type of response"]'))
+            action = action_chains.ActionChains(self.driver)
+            action.move_to_element(type_of_response[0])
+            action.click(type_of_response[0])
+            action.perform()
+            sleep(5)
+            forwad_link = WebDriverWait(self.driver, 10).until(lambda x: x.find_elements_by_xpath('//div[text()="Edit subject"]/..'))
+            action.reset_actions()
+            action2 = action_chains.ActionChains(self.driver)
+            action2.move_to_element(forwad_link[0])
+            action2.pause(2)
+            action2.click_and_hold(forwad_link[0])
+            action2.pause(1)
+            action2.release(forwad_link[0])
+            action2.perform()    
+            sleep(5)        
+            subject_input = WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//input[@name="subjectbox"]'))
+            #document.getElementsByName("subjectbox")[0].value
+            #self.driver.execute_script("arguments[0].innerHTML = arguments[1];", content_element, forward_mail_html);
+            #sub_val=self.driver.execute_script("document.getElementsByName('subjectbox')[0].value")
+            if single_campaign.subject!=None and len(single_campaign.subject)!=0:
+                logger.info('subject_input {}'.format(subject_input))
+                subject_input.send_keys(single_campaign.subject)
+            else:
+                logger.info('Current value of subject')
+                subjct=subject_input.get_attribute("value")
+                logger.info(subjct)
+                match=match = re.search(r'Fwd:', subjct)
+                if match:                      
+                    subjct=subjct.replace(match.group(), '')
+                    logger.info('Updated subject {}'.format(subjct))
+                    subject_input.send_keys(subjct)
+                else:
+                    pass
+            sleep(3)
+            send=WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//div[text()="Send"]'))  
+            self.driver.execute_script("arguments[0].click();", send);
+            sleep(10)
                 
-                logger.info('Find forward mail link') 
-                forward_link_spans=WebDriverWait(self.driver, 10).until(lambda x: x.find_elements_by_xpath('//span[text()="Forward"]'))
-                for forward_link in forward_link_spans:
-                    try:
-                        reply_link=forward_link.find_elements_by_xpath('.//preceding-sibling::span[text()="Reply"]')
-                        if len(reply_link)==1:
-                            logger.info('Selecting forward mail link')
-                            forward_link.click()
-                            break
-                    except Exception:
-                        pass
-                sleep(6)
-                WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//textarea[@name="to"]')).send_keys(account.user_name)
-                sleep(5)
-                bcc = ''
-                if len(recipients_list) >= 1:
-                    logger.info('Preparing forward mail recipients')
-                    for x in range(len(recipients_list)):
-                        if len(bcc) == 0:
-                            bcc = bcc + recipients_list[x].user_name
-                        else:
-                            bcc = bcc + ',' + recipients_list[x].user_name
-                    logger.info('list to forward mail to:')
-                    logger.info(bcc)
-                    bcc_link_spans=WebDriverWait(self.driver, 10).until(lambda x: x.find_elements_by_xpath('//span[text()="Bcc"]'))
-                    for bcc_link_span in bcc_link_spans:
-                        try:
-                            if "Recipients" in bcc_link_span.get_attribute('data-tooltip'):
-                                logger.info('Selecting bcc mail link')
-                                bcc_link_span.click()
-                        except Exception:
-                            pass
-                    WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//textarea[@name="bcc"]')).send_keys(bcc)
-                
-                sleep(7)
-                WebDriverWait(self.driver, 10).until(lambda x: x.find_element_by_xpath('//div[text()="Send"]')).click()
-                sleep(5)
-                
-            except Exception, e:
-                logger.debug(e, exc_info=True)       
-                self.driver.save_screenshot(LOG_PATH  + 'forward_stared_error.png')
-                error_msg = 'Error during forwarding stared mail to accounts'
-                error_msg = error_msg + ' please see error image at {}'.format(LOG_PATH + 'forward_stared_error.png')
-                logger.error(error_msg)
-                err = error()
-                err.save_error(error_msg + '\n' + str(e))
-    
     
     def prepare_mail_to_forward(self,account_list):
         message=None
@@ -537,6 +625,7 @@ class Gmail:
                 recipients_lt.append(acc)
         self.send_mail(recipients_lt, account_lt, account_threashhold, message,subject,is_forward)    
         self.forward_stared=False
+    
     
 class mails_slicer:
 
@@ -681,11 +770,10 @@ def start_campaign(recipients_list, account_list, account_threashhold, message, 
             #increment total_sent from the account that forwareded.
             for indx  in range(len(account_lt)):
                 if len(account_lt[indx].forward_from.strip())!=0 and int(account_lt[indx].forward_from)==1:
-                    account_lt[indx].total_sent=len(account_lt)
+                    account_lt[indx].total_sent=len(account_lt)+2 #add 2 because 
         else:
             msg.save(message[0], campaign_id)
         logger.info('Starting send process, mail is forward? {}'.format(is_forward_campaign))
-        message=''
         gmail.send_mail(recipients_lt, account_lt, account_threashhold, message,subject,is_forward_campaign)
         logger.info('Finished sending all mails, exiting completely')
         sleep(7)

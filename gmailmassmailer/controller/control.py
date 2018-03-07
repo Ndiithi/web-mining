@@ -19,6 +19,7 @@ class controller:
     def set_mail_message(self, f):
         fle = io.open(f, 'r', encoding="utf-8")
         self.message = fle.readlines()
+        print 'the message is {}'.format(self.message)
     
     def add_accounts(self, f):
         self.accounts_file = f
