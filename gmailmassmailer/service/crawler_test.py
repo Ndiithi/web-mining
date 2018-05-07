@@ -12,14 +12,13 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 recipients=['duncanndiithi@gmail.com','duncanndiithi@yahoo.com','duncan.ndiithi@inmobia.com']
         
-acc1=account('duncanndiithi','elizabeth@wairimu26',498)
-#acc2=account('willyadobe','seku@senior26')
+acc1=account('account_name','password',498)
 
 account_list=[]
 account_list.append(acc1)
 #account_list.append(acc2)
 
 
-crawler.start_campaign(recipients, account_list, 2, "Hi men,\njust ticking if gmail ticks")
+crawler.start_campaign(recipients, account_list, 2, "Hi,\njust ticking if gmail ticks")
 
 
